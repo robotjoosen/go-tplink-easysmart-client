@@ -32,3 +32,9 @@ type Transfer struct {
 	Good int `json:"good"`
 	Bad  int `json:"bad"`
 }
+
+type PortSpeed struct {
+	PortNumber      int `json:"port_number"`
+	IngressRateKbps int `json:"ingress_rate_kbps"`
+	EgressRateKbps  int `json:"egress_rate_kbps"`
+}

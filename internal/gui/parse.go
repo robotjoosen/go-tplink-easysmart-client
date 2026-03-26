@@ -16,6 +16,10 @@ const (
 
 	// device info
 	deviceInfoRegex = `".*"`
+
+	// qos
+	portNumberRegex = `var portNumber = (\d+);`
+	bcInfoRegex     = `bcInfo=new Array\((.*?)\)`
 )
 
 func parsePackets(html string, limit int) [][]int {
@@ -143,6 +147,38 @@ func parseDeviceInfo(html string) []string {
 	output := make([]string, 0)
 	for _, m := range matches {
 		output = append(output, strings.Replace(m[0], `"`, ``, -1))
+	}
+
+	return output
+}
+
+func parsePortSpeeds(html string, limit int) [][]int {
+	regex := regexp.MustCompile(bcInfoRegex)
+	matches := regex.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return make([][]int, 0)
+	}
+
+	raw := matches[0][1]
+	list := strings.Split(raw, ",")
+
+	port := 0
+	output := make([][]int, limit)
+	for _, v := range list {
+		if port >= limit {
+			break
+		}
+
+		i, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return make([][]int, 0)
+		}
+
+		output[port] = append(output[port], i)
+
+		if len(output[port]) == 2 {
+			port++
+		}
 	}
 
 	return output

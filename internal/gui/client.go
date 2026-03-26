@@ -18,6 +18,9 @@ const (
 	PathSystemInfo = "/SystemInfoRpm.htm"
 	PathPortStats  = "/PortStatisticsRpm.htm"
 	PathLedControl = "/led_on_set.cgi"
+	PathClearStats = "/port_statistics_set.cgi"
+	PathQoS        = "/QosBandWidthControlRpm.htm"
+	PathQoSSet     = "/qos_bandwidth_set.cgi"
 )
 
 type Client struct {
@@ -159,4 +162,110 @@ func (c *Client) SetLED(ctx context.Context, state bool) error {
 	}
 
 	return nil
+}
+
+func (c *Client) ClearPortStatistics(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+PathClearStats+"?clear=Clear", nil)
+	if err != nil {
+		return errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	if _, err := c.client.Do(req); err != nil {
+		return errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	return nil
+}
+
+func (c *Client) GetPortSpeeds(ctx context.Context) ([]model.PortSpeed, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+PathQoS, nil)
+	if err != nil {
+		return nil, errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	rsp, err := c.client.Do(req)
+	if err != nil {
+		return nil, errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	if err != nil {
+		return nil, errors.Join(err, clientErrors.ErrInvalidResponse)
+	}
+
+	html := string(bodyBytes)
+	maxPorts := parseMaxPorts(html)
+	if maxPorts == 0 {
+		return nil, clientErrors.ErrInvalidResponse
+	}
+
+	speeds := parsePortSpeeds(html, maxPorts)
+	if len(speeds) == 0 {
+		return nil, clientErrors.ErrInvalidResponse
+	}
+
+	portSpeeds := make([]model.PortSpeed, maxPorts)
+	for i := range portSpeeds {
+		portSpeeds[i] = model.PortSpeed{
+			PortNumber:      i + 1,
+			IngressRateKbps: speeds[i][0],
+			EgressRateKbps:  speeds[i][1],
+		}
+	}
+
+	return portSpeeds, nil
+}
+
+func (c *Client) SetPortSpeeds(ctx context.Context, port, ingress, egress int) error {
+	if err := c.validatePort(port); err != nil {
+		return err
+	}
+
+	if err := c.validateRate(ingress); err != nil {
+		return err
+	}
+
+	if err := c.validateRate(egress); err != nil {
+		return err
+	}
+
+	p := url.Values{}
+	p.Add("port", strconv.Itoa(port))
+	p.Add("ingress_rate", strconv.Itoa(ingress))
+	p.Add("egress_rate", strconv.Itoa(egress))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.address+PathQoSSet, strings.NewReader(p.Encode()))
+	if err != nil {
+		return errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	if _, err := c.client.Do(req); err != nil {
+		return errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	return nil
+}
+
+func (c *Client) validatePort(port int) error {
+	if port < 1 || port > 24 {
+		return errors.Join(errors.New("port must be between 1 and 24"), clientErrors.ErrInvalidRequest)
+	}
+	return nil
+}
+
+func (c *Client) validateRate(rate int) error {
+	if rate < 0 || rate > 1000000 {
+		return errors.Join(errors.New("rate must be between 0 and 1000000 kbps"), clientErrors.ErrInvalidRequest)
+	}
+	return nil
+}
+
+func (c *Client) Logout(ctx context.Context) error {
+	return clientErrors.ErrNotSupported
+}
+
+func (c *Client) SetPortState(ctx context.Context, port int, enabled bool) error {
+	return clientErrors.ErrNotSupported
 }
