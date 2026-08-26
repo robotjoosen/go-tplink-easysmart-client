@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
@@ -29,8 +30,10 @@ type Client struct {
 }
 
 func NewClient(address string) *Client {
+	jar, _ := cookiejar.New(nil)
+
 	return &Client{
-		client:  http.DefaultClient,
+		client:  &http.Client{Jar: jar},
 		address: "http://" + address,
 	}
 }
