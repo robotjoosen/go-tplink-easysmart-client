@@ -25,6 +25,7 @@ type ClientAware interface {
 	ClearPortStatistics(ctx context.Context) error
 	GetPortSpeeds(ctx context.Context) ([]model.PortSpeed, error)
 	SetPortSpeeds(ctx context.Context, port, ingress, egress int) error
+	GetCableDiagnostics(ctx context.Context) ([]model.CableDiagnostics, error)
 }
 
 func NewClient(address string, m mode) ClientAware {

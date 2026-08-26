@@ -225,6 +225,10 @@ func (c *Client) SetPortSpeeds(ctx context.Context, port, ingress, egress int) e
 	return clientErrors.ErrNotSupported
 }
 
+func (c *Client) GetCableDiagnostics(ctx context.Context) ([]model.CableDiagnostics, error) {
+	return nil, clientErrors.ErrNotSupported
+}
+
 func (c *Client) buildRequest(cmd Command, payload []byte) []byte {
 	c.sequence++
 
