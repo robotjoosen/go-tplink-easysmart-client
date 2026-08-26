@@ -100,23 +100,33 @@ func (c *Client) GetDevice(ctx context.Context) (model.Device, error) {
 	}, nil
 }
 
-func (c *Client) GetPortStats(ctx context.Context) ([]model.Port, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+PathPortStats, nil)
+// fetchHTML performs a GET request against the given path and returns the
+// response body as a string.
+func (c *Client) fetchHTML(ctx context.Context, path string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+path, nil)
 	if err != nil {
-		return nil, errors.Join(err, clientErrors.ErrInvalidRequest)
+		return "", errors.Join(err, clientErrors.ErrInvalidRequest)
 	}
 
 	rsp, err := c.client.Do(req)
 	if err != nil {
-		return []model.Port{}, errors.Join(err, clientErrors.ErrInvalidRequest)
+		return "", errors.Join(err, clientErrors.ErrInvalidRequest)
 	}
 
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	if err != nil {
-		return []model.Port{}, errors.Join(err, clientErrors.ErrInvalidResponse)
+		return "", errors.Join(err, clientErrors.ErrInvalidResponse)
 	}
 
-	html := string(bodyBytes)
+	return string(bodyBytes), nil
+}
+
+func (c *Client) GetPortStats(ctx context.Context) ([]model.Port, error) {
+	html, err := c.fetchHTML(ctx, PathPortStats)
+	if err != nil {
+		return []model.Port{}, err
+	}
+
 	maxPorts := parseMaxPorts(html)
 	packets := parsePackets(html, maxPorts)
 	linkLabels := parseLinkLabels(html, maxPorts)
@@ -201,22 +211,12 @@ func (c *Client) GetCableDiagnostics(ctx context.Context) ([]model.CableDiagnost
 }
 
 func (c *Client) getMaxPorts(ctx context.Context) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+PathPortStats, nil)
+	html, err := c.fetchHTML(ctx, PathPortStats)
 	if err != nil {
-		return 0, errors.Join(err, clientErrors.ErrInvalidRequest)
+		return 0, err
 	}
 
-	rsp, err := c.client.Do(req)
-	if err != nil {
-		return 0, errors.Join(err, clientErrors.ErrInvalidRequest)
-	}
-
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	if err != nil {
-		return 0, errors.Join(err, clientErrors.ErrInvalidResponse)
-	}
-
-	return parseMaxPorts(string(bodyBytes)), nil
+	return parseMaxPorts(html), nil
 }
 
 func (c *Client) SetLED(ctx context.Context, state bool) error {
