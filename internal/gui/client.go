@@ -22,6 +22,7 @@ const (
 	PathClearStats = "/port_statistics_set.cgi"
 	PathQoS        = "/QosBandWidthControlRpm.htm"
 	PathQoSSet     = "/qos_bandwidth_set.cgi"
+	PathCableDiag  = "/cable_diag_get.cgi"
 )
 
 type Client struct {
@@ -146,6 +147,76 @@ func (c *Client) GetPortStats(ctx context.Context) ([]model.Port, error) {
 	}
 
 	return ports, err
+}
+
+func (c *Client) GetCableDiagnostics(ctx context.Context) ([]model.CableDiagnostics, error) {
+	maxPorts, err := c.getMaxPorts(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if maxPorts == 0 {
+		return nil, clientErrors.ErrInvalidResponse
+	}
+
+	p := url.Values{}
+	for i := 1; i <= maxPorts; i++ {
+		p.Add("chk_"+strconv.Itoa(i), strconv.Itoa(i))
+	}
+	p.Add("Apply", "Apply")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+PathCableDiag+"?"+p.Encode(), nil)
+	if err != nil {
+		return nil, errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	rsp, err := c.client.Do(req)
+	if err != nil {
+		return nil, errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	if err != nil {
+		return nil, errors.Join(err, clientErrors.ErrInvalidResponse)
+	}
+
+	html := string(bodyBytes)
+	states := parseCableState(html, maxPorts)
+	lengths := parseCableLength(html, maxPorts)
+	if len(states) == 0 || len(lengths) == 0 {
+		return nil, clientErrors.ErrInvalidResponse
+	}
+
+	diagnostics := make([]model.CableDiagnostics, maxPorts)
+	for i := range diagnostics {
+		diagnostics[i] = model.CableDiagnostics{
+			PortNumber:       i + 1,
+			CableState:       cableStateLabel(states[i]),
+			CableStateNumber: states[i],
+			Length:           lengths[i],
+		}
+	}
+
+	return diagnostics, nil
+}
+
+func (c *Client) getMaxPorts(ctx context.Context) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+PathPortStats, nil)
+	if err != nil {
+		return 0, errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	rsp, err := c.client.Do(req)
+	if err != nil {
+		return 0, errors.Join(err, clientErrors.ErrInvalidRequest)
+	}
+
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	if err != nil {
+		return 0, errors.Join(err, clientErrors.ErrInvalidResponse)
+	}
+
+	return parseMaxPorts(string(bodyBytes)), nil
 }
 
 func (c *Client) SetLED(ctx context.Context, state bool) error {
