@@ -38,3 +38,10 @@ type PortSpeed struct {
 	IngressRateKbps int `json:"ingress_rate_kbps"`
 	EgressRateKbps  int `json:"egress_rate_kbps"`
 }
+
+type CableDiagnostics struct {
+	PortNumber       int    `json:"port_number"`
+	CableState       string `json:"cable_state"`
+	CableStateNumber int    `json:"cable_state_number"`
+	Length           int    `json:"length"`
+}
