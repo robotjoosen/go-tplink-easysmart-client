@@ -20,6 +20,10 @@ const (
 	// qos
 	portNumberRegex = `var portNumber = (\d+);`
 	bcInfoRegex     = `bcInfo=new Array\((.*?)\)`
+
+	// cable diagnostics
+	cableStateRegex  = `var cablestate = \[(.*)\];`
+	cableLengthRegex = `var cablelength = \[(.*)\];`
 )
 
 func parsePackets(html string, limit int) [][]int {
@@ -182,4 +186,60 @@ func parsePortSpeeds(html string, limit int) [][]int {
 	}
 
 	return output
+}
+
+func parseIntList(html, pattern string, limit int) []int {
+	regex := regexp.MustCompile(pattern)
+	matches := regex.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return make([]int, 0)
+	}
+
+	raw := matches[0][1]
+	list := strings.Split(raw, ",")
+
+	output := make([]int, limit)
+	for c, v := range list {
+		if c >= limit {
+			break
+		}
+
+		i, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return []int{}
+		}
+
+		output[c] = i
+	}
+
+	return output[:limit]
+}
+
+func parseCableState(html string, limit int) []int {
+	return parseIntList(html, cableStateRegex, limit)
+}
+
+func parseCableLength(html string, limit int) []int {
+	return parseIntList(html, cableLengthRegex, limit)
+}
+
+func cableStateLabel(n int) string {
+	switch n {
+	case 0:
+		return "No Cable"
+	case 1:
+		return "Normal"
+	case 2:
+		return "Open"
+	case 3:
+		return "Short"
+	case 4:
+		return "Open & Short"
+	case 5:
+		return "Cross Cable"
+	case -1:
+		return "Untested"
+	default:
+		return "Others"
+	}
 }
