@@ -112,6 +112,7 @@ func (c *Client) fetchHTML(ctx context.Context, path string) (string, error) {
 	if err != nil {
 		return "", errors.Join(err, clientErrors.ErrInvalidRequest)
 	}
+	defer rsp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	if err != nil {
@@ -175,22 +176,11 @@ func (c *Client) GetCableDiagnostics(ctx context.Context) ([]model.CableDiagnost
 	}
 	p.Add("Apply", "Apply")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+PathCableDiag+"?"+p.Encode(), nil)
+	html, err := c.fetchHTML(ctx, PathCableDiag+"?"+p.Encode())
 	if err != nil {
-		return nil, errors.Join(err, clientErrors.ErrInvalidRequest)
+		return nil, err
 	}
 
-	rsp, err := c.client.Do(req)
-	if err != nil {
-		return nil, errors.Join(err, clientErrors.ErrInvalidRequest)
-	}
-
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	if err != nil {
-		return nil, errors.Join(err, clientErrors.ErrInvalidResponse)
-	}
-
-	html := string(bodyBytes)
 	states := parseCableState(html, maxPorts)
 	lengths := parseCableLength(html, maxPorts)
 	if len(states) == 0 || len(lengths) == 0 {

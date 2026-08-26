@@ -22,8 +22,8 @@ const (
 	bcInfoRegex     = `bcInfo=new Array\((.*?)\)`
 
 	// cable diagnostics
-	cableStateRegex  = `var cablestate = \[(.*)\];`
-	cableLengthRegex = `var cablelength = \[(.*)\];`
+	cableStateRegex  = `var cablestate = \[(.*?)\];`
+	cableLengthRegex = `var cablelength = \[(.*?)\];`
 )
 
 func parsePackets(html string, limit int) [][]int {

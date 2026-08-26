@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	clientErrors "github.com/robotjoosen/go-tplink-easysmart-client/pkg/errors"
 	"github.com/robotjoosen/go-tplink-easysmart-client/pkg/model"
 )
 
@@ -80,4 +82,46 @@ var cablelength = [10, 0, 5, 0, -1];
 		{PortNumber: 3, CableState: "Open", CableStateNumber: 2, Length: 5},
 		{PortNumber: 4, CableState: "Untested", CableStateNumber: -1, Length: 0},
 	}, diagnostics)
+}
+
+func Test_GetCableDiagnostics_NoMaxPortNum(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc(PathPortStats, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<html><body>session expired, please log in</body></html>`))
+	})
+	mux.HandleFunc(PathCableDiag, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(``))
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := NewClient(server.Listener.Addr().String())
+
+	diagnostics, err := c.GetCableDiagnostics(context.Background())
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, clientErrors.ErrInvalidResponse))
+	assert.Nil(t, diagnostics)
+}
+
+func Test_GetCableDiagnostics_MissingCableStateArrays(t *testing.T) {
+	portStatsHTML := `<script>max_port_num = 4;</script>`
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(PathPortStats, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(portStatsHTML))
+	})
+	mux.HandleFunc(PathCableDiag, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<script>var maxPort = 4;</script>`))
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := NewClient(server.Listener.Addr().String())
+
+	diagnostics, err := c.GetCableDiagnostics(context.Background())
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, clientErrors.ErrInvalidResponse))
+	assert.Nil(t, diagnostics)
 }
