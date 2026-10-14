@@ -125,3 +125,44 @@ func Test_GetCableDiagnostics_MissingCableStateArrays(t *testing.T) {
 	assert.True(t, errors.Is(err, clientErrors.ErrInvalidResponse))
 	assert.Nil(t, diagnostics)
 }
+
+func Test_GetDevice_NonSwitchResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<html>not a switch</html>"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.Listener.Addr().String())
+
+	assert.NotPanics(t, func() {
+		_, err := c.GetDevice(context.Background())
+		assert.ErrorIs(t, err, clientErrors.ErrInvalidResponse)
+	})
+}
+
+func Test_Login_NonOKStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	c := NewClient(server.Listener.Addr().String())
+
+	assert.ErrorIs(t, c.Login(context.Background(), "a", "b"), clientErrors.ErrAuthenticationFailed)
+}
+
+func Test_GetDevice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("\"desc\"\n\"1.2.3.4\"\n\"aa-bb\"\n\"255.0.0.0\"\n\"1.2.3.1\"\n\"fw1\"\n\"hw1\"\n"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.Listener.Addr().String())
+
+	d, err := c.GetDevice(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, model.Device{
+		Description: "desc", IP: "1.2.3.4", MAC: "aa-bb", SubnetMask: "255.0.0.0",
+		DefaultGateway: "1.2.3.1", FirmwareVersion: "fw1", HardwareVersion: "hw1",
+	}, d)
+}

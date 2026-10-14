@@ -59,33 +59,23 @@ func (c *Client) Login(ctx context.Context, username, password string) error {
 	if err != nil {
 		return errors.Join(err, clientErrors.ErrAuthenticationFailed)
 	}
+	defer rsp.Body.Close()
 
 	if rsp.StatusCode != http.StatusOK {
-		return errors.Join(err, clientErrors.ErrAuthenticationFailed)
+		return clientErrors.ErrAuthenticationFailed
 	}
 
 	return nil
 }
 
 func (c *Client) GetDevice(ctx context.Context) (model.Device, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+PathSystemInfo, nil)
+	html, err := c.fetchHTML(ctx, PathSystemInfo)
 	if err != nil {
-		return model.Device{}, errors.Join(err, clientErrors.ErrInvalidRequest)
+		return model.Device{}, err
 	}
 
-	rsp, err := c.client.Do(req)
-	if err != nil {
-		return model.Device{}, errors.Join(err, clientErrors.ErrInvalidRequest)
-	}
-
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	if err != nil {
-		return model.Device{}, errors.Join(err, clientErrors.ErrInvalidResponse)
-	}
-
-	html := string(bodyBytes)
 	deviceInfo := parseDeviceInfo(html)
-	if len(deviceInfo) == 6 {
+	if len(deviceInfo) != 7 {
 		return model.Device{}, clientErrors.ErrInvalidResponse
 	}
 
@@ -100,8 +90,6 @@ func (c *Client) GetDevice(ctx context.Context) (model.Device, error) {
 	}, nil
 }
 
-// fetchHTML performs a GET request against the given path and returns the
-// response body as a string.
 func (c *Client) fetchHTML(ctx context.Context, path string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+path, nil)
 	if err != nil {
@@ -221,9 +209,11 @@ func (c *Client) SetLED(ctx context.Context, state bool) error {
 		return err
 	}
 
-	if _, err := c.client.Do(req); err != nil {
+	rsp, err := c.client.Do(req)
+	if err != nil {
 		return errors.Join(err, clientErrors.ErrInvalidRequest)
 	}
+	defer rsp.Body.Close()
 
 	return nil
 }
@@ -234,30 +224,21 @@ func (c *Client) ClearPortStatistics(ctx context.Context) error {
 		return errors.Join(err, clientErrors.ErrInvalidRequest)
 	}
 
-	if _, err := c.client.Do(req); err != nil {
+	rsp, err := c.client.Do(req)
+	if err != nil {
 		return errors.Join(err, clientErrors.ErrInvalidRequest)
 	}
+	defer rsp.Body.Close()
 
 	return nil
 }
 
 func (c *Client) GetPortSpeeds(ctx context.Context) ([]model.PortSpeed, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.address+PathQoS, nil)
+	html, err := c.fetchHTML(ctx, PathQoS)
 	if err != nil {
-		return nil, errors.Join(err, clientErrors.ErrInvalidRequest)
+		return nil, err
 	}
 
-	rsp, err := c.client.Do(req)
-	if err != nil {
-		return nil, errors.Join(err, clientErrors.ErrInvalidRequest)
-	}
-
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	if err != nil {
-		return nil, errors.Join(err, clientErrors.ErrInvalidResponse)
-	}
-
-	html := string(bodyBytes)
 	maxPorts := parseMaxPorts(html)
 	if maxPorts == 0 {
 		return nil, clientErrors.ErrInvalidResponse
@@ -305,9 +286,11 @@ func (c *Client) SetPortSpeeds(ctx context.Context, port, ingress, egress int) e
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	if _, err := c.client.Do(req); err != nil {
+	rsp, err := c.client.Do(req)
+	if err != nil {
 		return errors.Join(err, clientErrors.ErrInvalidRequest)
 	}
+	defer rsp.Body.Close()
 
 	return nil
 }
