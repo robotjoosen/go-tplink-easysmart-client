@@ -38,8 +38,7 @@ func Test_Login_PersistsSessionCookie(t *testing.T) {
 	err := c.Login(context.Background(), "admin", "admin")
 	assert.NoError(t, err)
 
-	_, err = c.GetPortStats(context.Background())
-	assert.NoError(t, err)
+	_, _ = c.GetPortStats(context.Background()) // page body is irrelevant; only the cookie is checked
 
 	assert.Equal(t, "abc123", sawCookie)
 }
@@ -165,4 +164,48 @@ func Test_GetDevice(t *testing.T) {
 		Description: "desc", IP: "1.2.3.4", MAC: "aa-bb", SubnetMask: "255.0.0.0",
 		DefaultGateway: "1.2.3.1", FirmwareVersion: "fw1", HardwareVersion: "hw1",
 	}, d)
+}
+
+func portStatsServer(body string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+}
+
+func Test_GetPortStats(t *testing.T) {
+	server := portStatsServer(`max_port_num = 2;
+state:[1,0],
+link_status:[1,0],
+link_info=new Array("Link Down","100M Full"),
+pkts:[1,2,3,4,5,6,7,8]`)
+	defer server.Close()
+
+	ports, err := NewClient(server.Listener.Addr().String()).GetPortStats(context.Background())
+
+	assert.NoError(t, err)
+	assert.Len(t, ports, 2)
+	assert.Equal(t, "100M Full", ports[0].Stats.LinkStatus)
+	assert.True(t, ports[0].Stats.Enabled)
+	assert.Equal(t, 4, ports[0].Stats.Packets.Receiver.Bad)
+	assert.Equal(t, 5, ports[1].Stats.Packets.Transmitter.Good)
+}
+
+func Test_GetPortStats_InvalidPages(t *testing.T) {
+	pages := map[string]string{
+		"login page":        `<html>please log in</html>`,
+		"short packets":     "max_port_num = 2;\nstate:[1,1],\nlink_status:[0,0],\nlink_info=new Array(\"a\",\"b\"),\npkts:[1,2,3,4]",
+		"link out of range": "max_port_num = 1;\nstate:[1],\nlink_status:[6],\nlink_info=new Array(\"a\",\"b\"),\npkts:[1,2,3,4]",
+	}
+
+	for name, page := range pages {
+		t.Run(name, func(t *testing.T) {
+			server := portStatsServer(page)
+			defer server.Close()
+
+			assert.NotPanics(t, func() {
+				_, err := NewClient(server.Listener.Addr().String()).GetPortStats(context.Background())
+				assert.ErrorIs(t, err, clientErrors.ErrInvalidResponse)
+			})
+		})
+	}
 }

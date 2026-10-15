@@ -113,7 +113,7 @@ func (c *Client) fetchHTML(ctx context.Context, path string) (string, error) {
 func (c *Client) GetPortStats(ctx context.Context) ([]model.Port, error) {
 	html, err := c.fetchHTML(ctx, PathPortStats)
 	if err != nil {
-		return []model.Port{}, err
+		return nil, err
 	}
 
 	maxPorts := parseMaxPorts(html)
@@ -121,6 +121,22 @@ func (c *Client) GetPortStats(ctx context.Context) ([]model.Port, error) {
 	linkLabels := parseLinkLabels(html, maxPorts)
 	linkStatus := parseLinkStatus(html, maxPorts)
 	status := parseStatusNumber(html, maxPorts)
+
+	if maxPorts == 0 || len(packets) != maxPorts || len(linkStatus) != maxPorts || len(status) != maxPorts {
+		return nil, clientErrors.ErrInvalidResponse
+	}
+
+	for i := range packets {
+		if len(packets[i]) != 4 {
+			return nil, clientErrors.ErrInvalidResponse
+		}
+	}
+
+	for _, n := range linkStatus {
+		if n < 0 || n >= len(linkLabels) {
+			return nil, clientErrors.ErrInvalidResponse
+		}
+	}
 
 	ports := make([]model.Port, maxPorts)
 	for i := range ports {
@@ -145,7 +161,7 @@ func (c *Client) GetPortStats(ctx context.Context) ([]model.Port, error) {
 		}
 	}
 
-	return ports, err
+	return ports, nil
 }
 
 func (c *Client) GetCableDiagnostics(ctx context.Context) ([]model.CableDiagnostics, error) {

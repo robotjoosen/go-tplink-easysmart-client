@@ -138,7 +138,7 @@ func parseLinkLabels(html string, limit int) []string {
 	raw := matches[0][1]
 	raw = strings.Replace(raw, `"`, ``, -1)
 
-	return strings.SplitN(raw, ",", limit)
+	return strings.Split(raw, ",")
 }
 
 func parseDeviceInfo(html string) []string {

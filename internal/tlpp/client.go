@@ -23,6 +23,7 @@ const (
 const (
 	MagicLen   = 4
 	HeaderLen  = 12
+	portRecLen = 18
 	MaxRetries = 3
 )
 
@@ -42,7 +43,6 @@ type Header struct {
 	Magic    [MagicLen]byte
 	Length   uint16
 	Sequence uint32
-	Flags    uint16
 	Command  uint16
 }
 
@@ -241,7 +241,6 @@ func (c *Client) buildRequest(cmd Command, payload []byte) []byte {
 		Magic:    [MagicLen]byte{0x00, 0x00, 0x00, 0x00},
 		Length:   uint16(length),
 		Sequence: c.sequence,
-		Flags:    0x0000,
 		Command:  uint16(cmd),
 	}
 
@@ -249,7 +248,7 @@ func (c *Client) buildRequest(cmd Command, payload []byte) []byte {
 	binary.BigEndian.PutUint32(buf[0:4], binary.BigEndian.Uint32(header.Magic[:]))
 	binary.BigEndian.PutUint16(buf[4:6], header.Length)
 	binary.BigEndian.PutUint32(buf[6:10], header.Sequence)
-	binary.BigEndian.PutUint16(buf[10:12], header.Flags)
+	binary.BigEndian.PutUint16(buf[10:12], header.Command)
 
 	offset := HeaderLen
 	if c.session != nil {
@@ -319,7 +318,8 @@ func (c *Client) parsePortStats(data []byte) ([]model.Port, error) {
 
 	offset := 1
 	for i := 0; i < portCount; i++ {
-		if offset+17 > len(data) {
+		if offset+portRecLen > len(data) {
+			ports = ports[:i]
 			break
 		}
 
@@ -346,7 +346,7 @@ func (c *Client) parsePortStats(data []byte) ([]model.Port, error) {
 			},
 		}
 
-		offset += 17
+		offset += portRecLen
 	}
 
 	return ports, nil
