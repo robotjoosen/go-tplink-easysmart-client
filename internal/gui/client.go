@@ -81,8 +81,8 @@ func (c *Client) GetDevice(ctx context.Context) (model.Device, error) {
 
 	return model.Device{
 		Description:     deviceInfo[0],
-		IP:              deviceInfo[1],
-		MAC:             deviceInfo[2],
+		MAC:             deviceInfo[1],
+		IP:              deviceInfo[2],
 		SubnetMask:      deviceInfo[3],
 		DefaultGateway:  deviceInfo[4],
 		FirmwareVersion: deviceInfo[5],
@@ -119,17 +119,11 @@ func (c *Client) GetPortStats(ctx context.Context) ([]model.Port, error) {
 	maxPorts := parseMaxPorts(html)
 	packets := parsePackets(html, maxPorts)
 	linkLabels := parseLinkLabels(html, maxPorts)
-	linkStatus := parseLinkStatus(html, maxPorts)
-	status := parseStatusNumber(html, maxPorts)
+	linkStatus := parseIntList(html, linkStatusRegex, maxPorts)
+	status := parseIntList(html, stateRegex, maxPorts)
 
 	if maxPorts == 0 || len(packets) != maxPorts || len(linkStatus) != maxPorts || len(status) != maxPorts {
 		return nil, clientErrors.ErrInvalidResponse
-	}
-
-	for i := range packets {
-		if len(packets[i]) != 4 {
-			return nil, clientErrors.ErrInvalidResponse
-		}
 	}
 
 	for _, n := range linkStatus {
@@ -255,7 +249,7 @@ func (c *Client) GetPortSpeeds(ctx context.Context) ([]model.PortSpeed, error) {
 		return nil, err
 	}
 
-	maxPorts := parseMaxPorts(html)
+	maxPorts := parsePortNumber(html)
 	if maxPorts == 0 {
 		return nil, clientErrors.ErrInvalidResponse
 	}
@@ -291,9 +285,10 @@ func (c *Client) SetPortSpeeds(ctx context.Context, port, ingress, egress int) e
 	}
 
 	p := url.Values{}
-	p.Add("port", strconv.Itoa(port))
-	p.Add("ingress_rate", strconv.Itoa(ingress))
-	p.Add("egress_rate", strconv.Itoa(egress))
+	p.Add("sel_"+strconv.Itoa(port), "1")
+	p.Add("igrRate", strconv.Itoa(ingress))
+	p.Add("egrRate", strconv.Itoa(egress))
+	p.Add("applay", "Apply") // sic: the switch's form field is misspelled
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.address+PathQoSSet, strings.NewReader(p.Encode()))
 	if err != nil {

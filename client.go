@@ -2,9 +2,12 @@ package client
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/robotjoosen/go-tplink-easysmart-client/internal/gui"
 	"github.com/robotjoosen/go-tplink-easysmart-client/internal/tlpp"
+	clientErrors "github.com/robotjoosen/go-tplink-easysmart-client/pkg/errors"
 	"github.com/robotjoosen/go-tplink-easysmart-client/pkg/model"
 )
 
@@ -28,13 +31,13 @@ type ClientAware interface {
 	GetCableDiagnostics(ctx context.Context) ([]model.CableDiagnostics, error)
 }
 
-func NewClient(address string, m mode) ClientAware {
+func NewClient(address string, m mode) (ClientAware, error) {
 	switch m {
 	case GUI:
-		return gui.NewClient(address)
+		return gui.NewClient(address), nil
 	case TLPP:
-		return tlpp.NewClient(address)
+		return tlpp.NewClient(address), nil
 	default:
-		return nil
+		return nil, errors.Join(fmt.Errorf("unknown mode %q", m), clientErrors.ErrInvalidRequest)
 	}
 }

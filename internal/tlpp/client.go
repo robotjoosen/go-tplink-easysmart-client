@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	clientErrors "github.com/robotjoosen/go-tplink-easysmart-client/pkg/errors"
@@ -25,6 +26,8 @@ const (
 	HeaderLen  = 12
 	portRecLen = 18
 	MaxRetries = 3
+
+	readTimeout = 2 * time.Second
 )
 
 type Command uint16
@@ -47,6 +50,7 @@ type Header struct {
 }
 
 type Client struct {
+	mu       sync.Mutex // guards conn, sequence and session across goroutines
 	conn     *net.UDPConn
 	addr     *net.UDPAddr
 	sequence uint32
@@ -71,34 +75,58 @@ func (c *Client) Connect() error {
 	return nil
 }
 
-func (c *Client) send(req []byte) ([]byte, error) {
+// roundTrip builds and sends one request and returns the reply that carries
+// its sequence number. Calls are serialised because the socket is shared.
+func (c *Client) roundTrip(ctx context.Context, cmd Command, payload []byte) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	req := c.buildRequest(cmd, payload)
+
+	return c.send(ctx, req, binary.BigEndian.Uint32(req[6:10]))
+}
+
+func (c *Client) send(ctx context.Context, req []byte, seq uint32) ([]byte, error) {
 	if c.conn == nil {
 		if err := c.Connect(); err != nil {
 			return nil, err
 		}
 	}
 
+	buf := make([]byte, 4096)
 	for i := 0; i < MaxRetries; i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		if _, err := c.conn.Write(req); err != nil {
 			return nil, err
 		}
 
-		buf := make([]byte, 4096)
-		c.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-		n, _, err := c.conn.ReadFromUDP(buf)
-		if err != nil {
-			continue
+		deadline := time.Now().Add(readTimeout)
+		if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+			deadline = d
 		}
-		return buf[:n], nil
+		_ = c.conn.SetReadDeadline(deadline)
+
+		for {
+			n, _, err := c.conn.ReadFromUDP(buf)
+			if err != nil {
+				break // timed out: resend
+			}
+
+			// replies to earlier retries carry an older sequence; skip them
+			if n >= HeaderLen && binary.BigEndian.Uint32(buf[6:10]) == seq {
+				return append([]byte(nil), buf[:n]...), nil
+			}
+		}
 	}
 
 	return nil, errors.New("no response from switch")
 }
 
 func (c *Client) Login(ctx context.Context, username, password string) error {
-	req := c.buildRequest(CmdLogin, c.buildLoginPayload(username, password))
-
-	resp, err := c.send(req)
+	resp, err := c.roundTrip(ctx, CmdLogin, c.buildLoginPayload(username, password))
 	if err != nil {
 		return errors.Join(err, clientErrors.ErrAuthenticationFailed)
 	}
@@ -116,16 +144,15 @@ func (c *Client) Login(ctx context.Context, username, password string) error {
 		return clientErrors.ErrAuthenticationFailed
 	}
 
-	c.session = make([]byte, 16)
-	copy(c.session, resp[HeaderLen+1:HeaderLen+17])
+	c.mu.Lock()
+	c.session = append([]byte(nil), resp[HeaderLen+1:HeaderLen+17]...)
+	c.mu.Unlock()
 
 	return nil
 }
 
 func (c *Client) GetDevice(ctx context.Context) (model.Device, error) {
-	req := c.buildRequest(CmdGetDevice, nil)
-
-	resp, err := c.send(req)
+	resp, err := c.roundTrip(ctx, CmdGetDevice, nil)
 	if err != nil {
 		return model.Device{}, errors.Join(err, clientErrors.ErrInvalidResponse)
 	}
@@ -138,9 +165,7 @@ func (c *Client) GetDevice(ctx context.Context) (model.Device, error) {
 }
 
 func (c *Client) GetPortStats(ctx context.Context) ([]model.Port, error) {
-	req := c.buildRequest(CmdGetPortStat, nil)
-
-	resp, err := c.send(req)
+	resp, err := c.roundTrip(ctx, CmdGetPortStat, nil)
 	if err != nil {
 		return nil, errors.Join(err, clientErrors.ErrInvalidResponse)
 	}
@@ -158,9 +183,7 @@ func (c *Client) SetLED(ctx context.Context, state bool) error {
 		payload[0] = 0x01
 	}
 
-	req := c.buildRequest(CmdSetLED, payload)
-
-	resp, err := c.send(req)
+	resp, err := c.roundTrip(ctx, CmdSetLED, payload)
 	if err != nil {
 		return errors.Join(err, clientErrors.ErrInvalidRequest)
 	}
@@ -169,17 +192,22 @@ func (c *Client) SetLED(ctx context.Context, state bool) error {
 }
 
 func (c *Client) Logout(ctx context.Context) error {
-	if c.session == nil {
+	c.mu.Lock()
+	loggedIn := c.session != nil
+	c.mu.Unlock()
+
+	if !loggedIn {
 		return nil
 	}
 
-	req := c.buildRequest(CmdLogout, nil)
-
-	if _, err := c.send(req); err != nil {
+	if _, err := c.roundTrip(ctx, CmdLogout, nil); err != nil {
 		return errors.Join(err, clientErrors.ErrInvalidRequest)
 	}
 
+	c.mu.Lock()
 	c.session = nil
+	c.mu.Unlock()
+
 	return nil
 }
 
@@ -196,9 +224,7 @@ func (c *Client) SetPortState(ctx context.Context, port int, enabled bool) error
 		payload[1] = 0x00
 	}
 
-	req := c.buildRequest(CmdSetPortStat, payload)
-
-	resp, err := c.send(req)
+	resp, err := c.roundTrip(ctx, CmdSetPortStat, payload)
 	if err != nil {
 		return errors.Join(err, clientErrors.ErrInvalidRequest)
 	}

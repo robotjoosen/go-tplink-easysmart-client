@@ -10,7 +10,7 @@ go test ./...
 go test -v ./...
 
 # Run a single test
-go test -v -run Test_Client ./...
+go test -v -run Test_NewClient_UnknownMode ./...
 
 # Run tests with race detection
 go test -race ./...
@@ -114,8 +114,9 @@ const (
 - Use table-driven tests for multiple test cases
 
 ```go
-func Test_Client(t *testing.T) {
-    c := client.NewClient("192.168.2.101", client.TLPP)
+func Test_Client_GUI(t *testing.T) {
+    c, err := client.NewClient("192.168.2.101", client.GUI)
+    assert.NoError(t, err)
     assert.NoError(t, c.Login(context.Background(), "admin", "password"))
 }
 ```
@@ -125,14 +126,14 @@ func Test_Client(t *testing.T) {
 ### Client Factory Pattern
 Use a factory function with mode enum to select implementation:
 ```go
-func NewClient(address string, m mode) ClientAware {
+func NewClient(address string, m mode) (ClientAware, error) {
     switch m {
     case GUI:
-        return gui.NewClient(address)
+        return gui.NewClient(address), nil
     case TLPP:
-        return tlpp.NewClient(address)
+        return tlpp.NewClient(address), nil
     default:
-        return nil
+        return nil, errors.Join(fmt.Errorf("unknown mode %q", m), clientErrors.ErrInvalidRequest)
     }
 }
 ```

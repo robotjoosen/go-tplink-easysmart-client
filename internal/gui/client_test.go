@@ -152,7 +152,7 @@ func Test_Login_NonOKStatus(t *testing.T) {
 
 func Test_GetDevice(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("\"desc\"\n\"1.2.3.4\"\n\"aa-bb\"\n\"255.0.0.0\"\n\"1.2.3.1\"\n\"fw1\"\n\"hw1\"\n"))
+		_, _ = w.Write([]byte("\"desc\"\n\"aa-bb\"\n\"1.2.3.4\"\n\"255.0.0.0\"\n\"1.2.3.1\"\n\"fw1\"\n\"hw1\"\n"))
 	}))
 	defer server.Close()
 
@@ -161,7 +161,7 @@ func Test_GetDevice(t *testing.T) {
 	d, err := c.GetDevice(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, model.Device{
-		Description: "desc", IP: "1.2.3.4", MAC: "aa-bb", SubnetMask: "255.0.0.0",
+		Description: "desc", MAC: "aa-bb", IP: "1.2.3.4", SubnetMask: "255.0.0.0",
 		DefaultGateway: "1.2.3.1", FirmwareVersion: "fw1", HardwareVersion: "hw1",
 	}, d)
 }
@@ -208,4 +208,33 @@ func Test_GetPortStats_InvalidPages(t *testing.T) {
 			})
 		})
 	}
+}
+
+func Test_GetPortSpeeds(t *testing.T) {
+	server := portStatsServer("var portNumber = 2;\nvar bcInfo = new Array(\n100,200,0,\n300,400,1,\n0);")
+	defer server.Close()
+
+	speeds, err := NewClient(server.Listener.Addr().String()).GetPortSpeeds(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, []model.PortSpeed{
+		{PortNumber: 1, IngressRateKbps: 100, EgressRateKbps: 200},
+		{PortNumber: 2, IngressRateKbps: 300, EgressRateKbps: 400},
+	}, speeds)
+}
+
+func Test_SetPortSpeeds_PostsSwitchFormFields(t *testing.T) {
+	var got url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		got = r.PostForm
+	}))
+	defer server.Close()
+
+	err := NewClient(server.Listener.Addr().String()).SetPortSpeeds(context.Background(), 3, 1000, 2000)
+
+	assert.NoError(t, err)
+	assert.Equal(t, url.Values{
+		"sel_3": {"1"}, "igrRate": {"1000"}, "egrRate": {"2000"}, "applay": {"Apply"},
+	}, got)
 }

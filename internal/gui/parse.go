@@ -19,44 +19,12 @@ const (
 
 	// qos
 	portNumberRegex = `var portNumber = (\d+);`
-	bcInfoRegex     = `bcInfo=new Array\((.*?)\)`
+	bcInfoRegex     = `bcInfo\s*=\s*new Array\(([^)]*)\)`
 
 	// cable diagnostics
 	cableStateRegex  = `var cablestate = \[(.*?)\];`
 	cableLengthRegex = `var cablelength = \[(.*?)\];`
 )
-
-func parsePackets(html string, limit int) [][]int {
-	regex := regexp.MustCompile(packetsRegex)
-	matches := regex.FindAllStringSubmatch(html, -1)
-	if len(matches) == 0 {
-		return make([][]int, 0)
-	}
-
-	raw := matches[0][1]
-	list := strings.Split(raw, ",")
-
-	port := 0
-	output := make([][]int, limit)
-	for c, v := range list {
-		if port >= limit {
-			break
-		}
-
-		i, err := strconv.Atoi(v)
-		if err != nil {
-			return make([][]int, 0)
-		}
-
-		output[port] = append(output[port], i)
-
-		if c%4 == 3 {
-			port++
-		}
-	}
-
-	return output
-}
 
 func parseMaxPorts(html string) int {
 	regex := regexp.MustCompile(maxPortsRegex)
@@ -72,60 +40,6 @@ func parseMaxPorts(html string) int {
 	}
 
 	return i
-}
-
-func parseStatusNumber(html string, limit int) []int {
-	regex := regexp.MustCompile(stateRegex)
-	matches := regex.FindAllStringSubmatch(html, -1)
-	if len(matches) == 0 {
-		return make([]int, 0)
-	}
-
-	raw := matches[0][1]
-	list := strings.Split(raw, ",")
-
-	output := make([]int, limit)
-	for c, v := range list {
-		if c >= limit {
-			break
-		}
-
-		i, err := strconv.Atoi(v)
-		if err != nil {
-			return []int{}
-		}
-
-		output[c] = i
-	}
-
-	return output[:limit]
-}
-
-func parseLinkStatus(html string, limit int) []int {
-	regex := regexp.MustCompile(linkStatusRegex)
-	matches := regex.FindAllStringSubmatch(html, -1)
-	if len(matches) == 0 {
-		return make([]int, 0)
-	}
-
-	raw := matches[0][1]
-	list := strings.Split(raw, ",")
-
-	output := make([]int, limit)
-	for c, v := range list {
-		if c >= limit {
-			break
-		}
-
-		i, err := strconv.Atoi(v)
-		if err != nil {
-			return []int{}
-		}
-
-		output[c] = i
-	}
-
-	return output[:limit]
 }
 
 func parseLinkLabels(html string, limit int) []string {
@@ -156,38 +70,6 @@ func parseDeviceInfo(html string) []string {
 	return output
 }
 
-func parsePortSpeeds(html string, limit int) [][]int {
-	regex := regexp.MustCompile(bcInfoRegex)
-	matches := regex.FindAllStringSubmatch(html, -1)
-	if len(matches) == 0 {
-		return make([][]int, 0)
-	}
-
-	raw := matches[0][1]
-	list := strings.Split(raw, ",")
-
-	port := 0
-	output := make([][]int, limit)
-	for _, v := range list {
-		if port >= limit {
-			break
-		}
-
-		i, err := strconv.Atoi(strings.TrimSpace(v))
-		if err != nil {
-			return make([][]int, 0)
-		}
-
-		output[port] = append(output[port], i)
-
-		if len(output[port]) == 2 {
-			port++
-		}
-	}
-
-	return output
-}
-
 func parseIntList(html, pattern string, limit int) []int {
 	regex := regexp.MustCompile(pattern)
 	matches := regex.FindAllStringSubmatch(html, -1)
@@ -198,13 +80,13 @@ func parseIntList(html, pattern string, limit int) []int {
 	raw := matches[0][1]
 	list := strings.Split(raw, ",")
 
-	output := make([]int, limit)
-	for c, v := range list {
-		if c >= limit {
-			break
-		}
+	if len(list) < limit {
+		return []int{}
+	}
 
-		i, err := strconv.Atoi(strings.TrimSpace(v))
+	output := make([]int, limit)
+	for c := range output {
+		i, err := strconv.Atoi(strings.TrimSpace(list[c]))
 		if err != nil {
 			return []int{}
 		}
@@ -212,7 +94,42 @@ func parseIntList(html, pattern string, limit int) []int {
 		output[c] = i
 	}
 
-	return output[:limit]
+	return output
+}
+
+// chunk splits a flat list into rows of n values; a list that does not hold
+// exactly rows*n values yields no rows.
+func chunk(list []int, n int) [][]int {
+	if len(list) == 0 || len(list)%n != 0 {
+		return [][]int{}
+	}
+
+	rows := make([][]int, 0, len(list)/n)
+	for i := 0; i < len(list); i += n {
+		rows = append(rows, list[i:i+n])
+	}
+
+	return rows
+}
+
+func parsePackets(html string, limit int) [][]int {
+	return chunk(parseIntList(html, packetsRegex, limit*4), 4)
+}
+
+// parsePortSpeeds returns one row per port: ingress rate, egress rate and LAG id.
+func parsePortSpeeds(html string, limit int) [][]int {
+	return chunk(parseIntList(html, bcInfoRegex, limit*3), 3)
+}
+
+func parsePortNumber(html string) int {
+	m := regexp.MustCompile(portNumberRegex).FindStringSubmatch(html)
+	if m == nil {
+		return 0
+	}
+
+	n, _ := strconv.Atoi(m[1])
+
+	return n
 }
 
 func parseCableState(html string, limit int) []int {

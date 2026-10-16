@@ -3,7 +3,10 @@ package tlpp
 import (
 	"context"
 	"encoding/binary"
+	"net"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -47,4 +50,75 @@ func Test_parsePortStats_TwoPorts(t *testing.T) {
 	assert.Equal(t, "100M Full", ports[0].Stats.LinkStatus)
 	assert.Equal(t, 7, ports[0].Stats.Packets.Transmitter.Good)
 	assert.Equal(t, 9, ports[1].Stats.Packets.Transmitter.Good)
+}
+
+func reply(seq uint32, cmd Command) []byte {
+	b := make([]byte, HeaderLen)
+	binary.BigEndian.PutUint16(b[4:6], HeaderLen)
+	binary.BigEndian.PutUint32(b[6:10], seq)
+	binary.BigEndian.PutUint16(b[10:12], uint16(cmd))
+	return b
+}
+
+func fakeSwitch(t *testing.T, handle func(conn *net.UDPConn, from *net.UDPAddr, req []byte)) *Client {
+	t.Helper()
+
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	assert.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, from, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			handle(conn, from, buf[:n])
+		}
+	}()
+
+	c := NewClient("127.0.0.1")
+	c.addr = conn.LocalAddr().(*net.UDPAddr)
+
+	return c
+}
+
+func Test_send_SkipsStaleReplies(t *testing.T) {
+	c := fakeSwitch(t, func(conn *net.UDPConn, from *net.UDPAddr, req []byte) {
+		seq := binary.BigEndian.Uint32(req[6:10])
+		_, _ = conn.WriteToUDP(reply(seq-1, CmdSetLED), from)
+		_, _ = conn.WriteToUDP(reply(seq, CmdSetLED), from)
+	})
+
+	assert.NoError(t, c.SetLED(context.Background(), true))
+}
+
+func Test_send_HonoursContextDeadline(t *testing.T) {
+	c := fakeSwitch(t, func(*net.UDPConn, *net.UDPAddr, []byte) {})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := c.SetLED(ctx, true)
+
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), time.Second)
+}
+
+func Test_roundTrip_Concurrent(t *testing.T) {
+	c := fakeSwitch(t, func(conn *net.UDPConn, from *net.UDPAddr, req []byte) {
+		_, _ = conn.WriteToUDP(reply(binary.BigEndian.Uint32(req[6:10]), CmdSetLED), from)
+	})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			assert.NoError(t, c.SetLED(context.Background(), true))
+		}()
+	}
+	wg.Wait()
 }
